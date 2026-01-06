@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Réservations</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+</head>
+<body>
+    <h1>Administration des Réservations</h1>
+    <div id="loginForm">
+        <label for="loginPassword">Mot de passe :</label>
+        <input type="password" id="loginPassword" required>
+        <button id="loginBtn">Se connecter</button>
+    </div>
+    <div id="adminPanel" style="display: none;">
+        <h2>Modifier les Réservations</h2>
+        <table id="adminTable" border="1">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Nom</th>
+                    <th>Type</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Les réservations seront ajoutées ici -->
+            </tbody>
+        </table>
+        <div id="message"></div>
+        <button id="backBtn">Retour</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/fr.js"></script>
+    <script>
+        const serverUrl = window.location.origin;
+        const loginForm = document.getElementById('loginForm');
+        const adminPanel = document.getElementById('adminPanel');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginPassword = document.getElementById('loginPassword');
+        const adminTableBody = document.querySelector('#adminTable tbody');
+        const backBtn = document.getElementById('backBtn');
+        const messageDiv = document.getElementById('message');
+
+        let reservations = [];
+
+        // Charger les réservations
+        async function loadReservations() {
+            try {
+                const response = await fetch(`${serverUrl}/reservations`);
+                reservations = await response.json();
+                displayAdminReservations();
+            } catch (error) {
+                console.error('Erreur lors du chargement des réservations:', error);
+            }
+        }
+
+        // Afficher les réservations avec boutons modifier/supprimer (triées par date croissante)
+        function displayAdminReservations() {
+            adminTableBody.innerHTML = '';
+            // Conserver l'indice original puis trier par date (les plus anciennes en premier)
+            const indexed = reservations.map((r, i) => ({ ...r, __idx: i }));
+            const sorted = indexed.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            sorted.forEach((res) => {
+                const origIndex = res.__idx;
+                const row = adminTableBody.insertRow();
+                const formattedDate = new Date(res.date).toLocaleDateString('fr-FR');
+                row.innerHTML = `
+                    <td><input type="text" value="${formattedDate}" id="date-${origIndex}"></td>
+                    <td><input type="text" value="${res.name}" id="name-${origIndex}"></td>
+                    <td>
+                        <select id="type-${origIndex}">
+                            <option value="Trajet : mosquée Étampes --> mosquée Étampes maison de cheikh Moussa" ${res.type === 'Trajet : mosquée Étampes --> mosquée Étampes maison de cheikh Moussa' ? 'selected' : ''}>Trajet : mosquée Étampes --> mosquée Étampes maison de cheikh Moussa</option>
+                            <option value="Trajet : maison de cheikh Moussa --> mosquée Étampes" ${res.type === 'Trajet : maison de cheikh Moussa --> mosquée Étampes' ? 'selected' : ''}>Trajet : maison de cheikh Moussa --> mosquée Étampes</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button onclick="updateReservation(${origIndex})">Modifier</button>
+                        <button onclick="deleteReservation(${origIndex})">Supprimer</button>
+                    </td>
+                `;
+                // Initialiser Flatpickr pour chaque date en utilisant l'indice original
+                    // Autoriser seulement les vendredis dans l'admin
+                    flatpickr(`#date-${origIndex}`, {
+                        locale: "fr",
+                        dateFormat: "d/m/Y",
+                        allowInput: true,
+                        enable: [function(date) { return date.getDay() === 5; }]
+                    });
+            });
+        }
+
+        // Login
+        loginBtn.addEventListener('click', async () => {
+            const password = loginPassword.value;
+            try {
+                const response = await fetch(`${serverUrl}/admin-login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                if (response.ok) {
+                    loginForm.style.display = 'none';
+                    adminPanel.style.display = 'block';
+                    loadReservations();
+                } else {
+                    alert('Mot de passe incorrect.');
+                }
+            } catch (error) {
+                console.error('Erreur:', error);
+            }
+        });
+
+        // Retour
+        backBtn.addEventListener('click', () => {
+            window.location.href = 'main.html';
+        });
+
+        // Mettre à jour une réservation
+        async function updateReservation(index) {
+            const dateInput = document.getElementById(`date-${index}`).value;
+            const [day, month, year] = dateInput.split('/');
+            const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            // Vérifier que c'est un vendredi
+            const d = new Date(isoDate);
+            if (d.getDay() !== 5) {
+                alert('La date doit être un vendredi.');
+                return;
+            }
+            const name = document.getElementById(`name-${index}`).value;
+            const type = document.getElementById(`type-${index}`).value;
+
+            try {
+                const response = await fetch(`${serverUrl}/reservations/${index}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, date: isoDate, type })
+                });
+                if (response.ok) {
+                    messageDiv.textContent = 'Modification prise en compte.';
+                    messageDiv.style.display = 'block';
+                    setTimeout(() => messageDiv.style.display = 'none', 3000);
+                    loadReservations(); // Recharger
+                } else {
+                    const error = await response.json();
+                    alert('Erreur : ' + error.error);
+                }
+            } catch (error) {
+                console.error('Erreur:', error);
+                alert('Erreur de connexion.');
+            }
+        }
+
+        // Supprimer une réservation
+        async function deleteReservation(index) {
+            console.log('Attempting to delete reservation at index:', index);
+            if (confirm('Supprimer cette réservation ?')) {
+                try {
+                    console.log('Sending DELETE request for index:', index);
+                    const response = await fetch(`${serverUrl}/reservations/${index}`, {
+                        method: 'DELETE'
+                    });
+                    console.log('Response status:', response.status);
+                    if (response.ok) {
+                        messageDiv.textContent = 'Réservation supprimée avec succès.';
+                        messageDiv.style.display = 'block';
+                        setTimeout(() => messageDiv.style.display = 'none', 3000);
+                        loadReservations(); // Recharger
+                    } else {
+                        const errorText = await response.text();
+                        console.error('Error response:', errorText);
+                        alert('Erreur lors de la suppression: ' + errorText);
+                    }
+                } catch (error) {
+                    console.error('Erreur de connexion:', error);
+                    alert('Erreur de connexion.');
+                }
+            }
+        }
+    </script>
+</body>
+</html>
